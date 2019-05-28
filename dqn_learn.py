@@ -39,6 +39,7 @@ def read_depth(data):
     try:
         bridge = CvBridge()
         depth_data = bridge.imgmsg_to_cv2(data, "passthrough")
+        
     except CvBridgeError as e:
         print(e)
 
@@ -145,7 +146,8 @@ def dqn_learing(
         rgb_data=depth_data.reshape(640,480,1)
         obs=rgb_data
         ##evaluate the action
-        dis_data=np.array(depth_data[250:390,200:280])
+        dis_data=np.array(depth_data)
+        dis_data[np.isnan(dis_data)]=999999999999
         dis_data[dis_data==0]=999999999999
         dis=np.min(dis_data)
         print("MIN DISTANCE:"+str(dis)+"-------------")
@@ -154,6 +156,7 @@ def dqn_learing(
             reward = 1
         else:
             reward =-1
+        print("REWARD:"+str(reward)+"--------------")
         # clip rewards between -1 and 1
         reward = max(-1.0, min(reward, 1.0))
         # Store other info in replay memory
