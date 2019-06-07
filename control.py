@@ -23,6 +23,8 @@ import rospy
 from geometry_msgs.msg import Twist
 from math import pi
 import math
+from gazebo_msgs.msg import ModelState
+from gazebo_msgs.srv import SetModelState
 class Turn():
     def __init__(self, angle):
         # Give the node a name
@@ -246,6 +248,20 @@ def control_robot(operation):
     elif operation == 5:
         print("Turn Left pi/4---------")
         Turn(-math.pi/4)
+    elif operation == 6:
+        print("Reset robot-----------")
+        rospy.wait_for_service('/gazebo/set_model_state')
+        try:
+            # Reset position of the rc Car
+            reset_pose = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
+            nullPosition = ModelState()
+            nullPosition.model_name = "mobile_base"
+            nullPosition.pose.position.x = 0
+            nullPosition.pose.position.y = 0
+            nullPosition.pose.position.z = 0.05
+            reset_pose(nullPosition)
+        except (rospy.ServiceException) as e:        
+            print ("/gazebo/set_model_state service call failed")
         
 #if __name__ == '__main__':
     #try:

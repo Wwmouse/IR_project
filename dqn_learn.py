@@ -12,6 +12,7 @@ import numpy as np
 import cv2
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
+from std_msgs.msg import Float32MultiArray
 
 depth_data = None
 rgb_data = None
@@ -23,6 +24,7 @@ import torch.autograd as autograd
 from utils.replay_buffer import ReplayBuffer
 
 USE_CUDA = torch.cuda.is_available()
+max_range=5
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 def read_image():
     rospy.init_node('read_image', anonymous=True)
@@ -58,6 +60,18 @@ def read_rgb(data):
     img = data_str[idx+1:-1].split(', ')
     rgb_data = np.array(img, dtype=np.int8)
     rgb_data = rgb_data.reshape(480, 640, 3)
+
+identify = False
+def read_identity():
+    rospy.Subscriber('/objects', Float32MultiArray, identify_goal)
+    rospy.sleep(3)
+def identify_goal(data):
+    global identify        
+    if data.data==():
+        identify = False
+    else:
+        identify = True    
+
     
 class Variable(autograd.Variable):
     def __init__(self, data, *args, **kwargs):
@@ -93,9 +107,10 @@ def dqn_learing(
     target_update_freq=10000
     ):
 
-
+    control_robot(6)
     #our own code
     read_image()
+    read_identity()
     rgb_data=depth_data.reshape(640,480,1);
     input_arg=rgb_data;     #input for the algorithm
     num_actions=5
@@ -129,6 +144,9 @@ def dqn_learing(
     num_param_updates = 0
     for t in count():
 
+        if t==1000:
+            torch.save(Q.state_dict(),"model.pkl")
+            break
 
         last_idx = replay_buffer.store_frame(last_obs)
 
@@ -143,24 +161,32 @@ def dqn_learing(
 
         control_robot(action + 1)
 
-        rgb_data=depth_data.reshape(640,480,1)
-        obs=rgb_data
+        
         ##evaluate the action
         dis_data=np.array(depth_data)
-        dis_data[np.isnan(dis_data)]=999999999999
-        dis_data[dis_data==0]=999999999999
+        dis_data[np.isnan(dis_data)]=max_range
+        #dis_data[dis_data==0]=999999999999
+        dis_data=dis_data/max_range
+        obs=dis_data.reshape(640,480,1)
         dis=np.min(dis_data)
         print("MIN DISTANCE:"+str(dis)+"-------------")
         reward = 0
-        if dis<500:
-            reward = 1
+
+        
+        if identify:
+            control_robot(6)
+            reward=1
         else:
-            reward =-1
-        print("REWARD:"+str(reward)+"--------------")
+            if dis<0.13:
+                reward = -1
+            else:
+                reward =0.5
+        
+        print("iteration:"+t+"\nREWARD:"+str(reward)+"--------------")
         # clip rewards between -1 and 1
         reward = max(-1.0, min(reward, 1.0))
         # Store other info in replay memory
-        replay_buffer.store_effect(last_idx, action, reward, False)
+        replay_buffer.store_effect(last_idx, action, reward, identify)
         # Resets the environment when reaching an episode boundary.
         #if done:
             #obs = env.reset()
