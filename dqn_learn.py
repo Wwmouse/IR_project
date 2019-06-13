@@ -13,7 +13,8 @@ import cv2
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import Float32MultiArray
-
+import math
+from gazebo_msgs.msg import ModelStates
 depth_data = None
 rgb_data = None
 import torch
@@ -23,9 +24,22 @@ import torch.autograd as autograd
 
 from utils.replay_buffer import ReplayBuffer
 
+x1 = [-0.72, 1.08] 
+x2 = [4.03, 4.90]
+robot_pose=[0,0]
 USE_CUDA = torch.cuda.is_available()
-max_range=5
+max_range=3500
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+
+def read_pose():
+    rospy.Subscriber("/gazebo/model_states", ModelStates, get_pos)
+    rospy.sleep(3)
+def get_pos(data): 
+    global robot_pose   
+    robot_pose=[data.pose[1].position.x,data.pose[1].position.y]
+
+
+
 def read_image():
     rospy.init_node('read_image', anonymous=True)
 
@@ -44,6 +58,8 @@ def read_depth(data):
         
     except CvBridgeError as e:
         print(e)
+
+
 
 def read_rgb(data):
     global rgb_data
@@ -107,10 +123,13 @@ def dqn_learing(
     target_update_freq=10000
     ):
 
-    control_robot(6)
+    max_distance=math.sqrt(pow(x1[0]-x2[0],2)+pow(x1[1]-x2[1],2))
+    target=[3.08, 0.44]
+    #control_robot(6)
     #our own code
     read_image()
     read_identity()
+    read_pose()
     rgb_data=depth_data.reshape(640,480,1);
     input_arg=rgb_data;     #input for the algorithm
     num_actions=5
@@ -131,7 +150,8 @@ def dqn_learing(
     # Initialize target q function and q function
     Q = q_func(1, num_actions).type(dtype)
     target_Q = q_func(1, num_actions).type(dtype)
-
+    target_Q.load_state_dict(torch.load("model.pkl"))
+    Q.load_state_dict(torch.load("model.pkl"))
     # Construct Q network optimizer function
     optimizer = optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
 
@@ -144,7 +164,7 @@ def dqn_learing(
     num_param_updates = 0
     for t in count():
 
-        if t==1000:
+        if t==5000:
             torch.save(Q.state_dict(),"model.pkl")
             break
 
@@ -165,14 +185,14 @@ def dqn_learing(
         ##evaluate the action
         dis_data=np.array(depth_data)
         dis_data[np.isnan(dis_data)]=max_range
-        #dis_data[dis_data==0]=999999999999
+        dis_data[dis_data==0]=max_range
         dis_data=dis_data/max_range
         obs=dis_data.reshape(640,480,1)
         dis=np.min(dis_data)
         print("MIN DISTANCE:"+str(dis)+"-------------")
         reward = 0
 
-        
+        test=False
         if identify:
             control_robot(6)
             reward=1
@@ -180,20 +200,25 @@ def dqn_learing(
             if dis<0.13:
                 reward = -1
             else:
-                reward =0.5
+                print(robot_pose)
+                reward=(1-math.sqrt(pow(target[0]-robot_pose[0],2)+pow(target[1]-robot_pose[1],2))/max_distance)
+                if reward>0.85:
+                    control_robot(6)
+                    test=True
+
         
-        print("iteration:"+t+"\nREWARD:"+str(reward)+"--------------")
+        print("iteration:"+str(t)+"\nREWARD:"+str(reward)+"--------------")
         # clip rewards between -1 and 1
         reward = max(-1.0, min(reward, 1.0))
         # Store other info in replay memory
-        replay_buffer.store_effect(last_idx, action, reward, identify)
+        replay_buffer.store_effect(last_idx, action, reward, test)
         # Resets the environment when reaching an episode boundary.
         #if done:
             #obs = env.reset()
         last_obs = obs
 
 
-        if (t > 1 and
+        if (t > 100000000 and
                 t % learning_freq == 0 and
                 replay_buffer.can_sample(batch_size)):
             print("Training")

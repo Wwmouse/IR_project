@@ -129,7 +129,7 @@ class MoveForward():
         r = rospy.Rate(rate)
         
         # Set the forward linear speed to 0.2 meters per second 
-        linear_speed = 0.2
+        linear_speed = 0.1
 
         move_cmd = Twist()
             
